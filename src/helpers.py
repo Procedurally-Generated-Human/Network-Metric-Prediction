@@ -225,6 +225,7 @@ def visualize_quantiles(low_pred, high_pred, y_true, q_low, q_high, horizon, tar
         coverage (float): average percentage of y_true between [low, high] quantile predictions  
         avg_width (float): average width between [low, high] prediction
     """
+    plt.figure(figsize=(12,4))
     inside = (y_true >= low_pred) & (y_true <= high_pred)
     coverage = inside.mean() * 100.0  # percentage
     avg_width = np.mean(high_pred - low_pred)

@@ -190,7 +190,7 @@ class QuantileLoss(nn.Module):
 
         # Compute quantile loss
         loss = torch.where(u >= 0.0, qs_row * u, (qs_row - 1.0) * u)  # (B, k)
-        return loss
+        return loss.mean()
 
 def train_lstm_timeseries(train_ds, test_ds, model_param={}):   
     """
@@ -325,8 +325,6 @@ def train_lstm_quantiles(train_ds, test_ds, model_param={}):
             optimizer.zero_grad()
             preds = model(xb)                  # (B, n_q)
             loss = objective(preds, yb)
-            per_q_loss = loss.mean(dim=0)
-            loss = per_q_loss.mean()                 # scalar for backward
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
@@ -531,7 +529,7 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
     test_loader = DataLoader(TensorDataset(torch.from_numpy(X_test.astype(np.float32)), torch.from_numpy(y_test.astype(np.float32))), batch_size=batch_size, shuffle=False, drop_last=False)
     best_loss = np.inf
     wait = 0
-    patience = 10
+    patience = 5
     train_losses=[]
     for epoch in range(epochs):
         model.train()
@@ -550,8 +548,8 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
         train_losses.append(avg_train)  
         print(f"Q={q} Epoch {epoch+1}/{epochs} Loss={avg_train:.4f}")
         # Early stopping
-        if loss.item() < best_loss - 1e-5:
-            best_loss = loss.item()
+        if avg_train < best_loss - 5e-4:
+            best_loss = avg_train
             wait = 0
             best_state = model.state_dict()
         else:
@@ -680,7 +678,7 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False)
     train_losses = []
     best_val_loss = float('inf')
-    patience = 10
+    patience = 5
     patience_counter = 0
     for epoch in range(epochs):
         model.train()
@@ -703,7 +701,7 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
         train_losses.append(avg_train_loss)
         print(f" Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.6f}")
         # Early stopping
-        if avg_train_loss < best_val_loss - 1e-4:
+        if avg_train_loss < best_val_loss - 5e-4:
             best_val_loss = avg_train_loss
             patience_counter = 0
             best_state = copy.deepcopy(model.state_dict())# torch.save(model.state_dict(), 'best_gru_rtt_model.pth')
@@ -759,7 +757,7 @@ def train_gru_quantiles(train_ds, test_ds, model_param={}):
 
     train_losses = []
     best_state = None
-    patience = 10
+    patience = 5
     wait = 0
     best_val=float('inf')
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False)
@@ -776,8 +774,6 @@ def train_gru_quantiles(train_ds, test_ds, model_param={}):
             optimizer.zero_grad()
             preds = model(xb)                  # (B, n_q)
             loss = objective(preds, yb)
-            per_q_loss = loss.mean(dim=0)
-            loss = per_q_loss.mean()                 # scalar for backward
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
@@ -787,7 +783,7 @@ def train_gru_quantiles(train_ds, test_ds, model_param={}):
 
         model.eval()        
         print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.6f}")
-        if avg_train_loss < best_val - 1e-3:
+        if avg_train_loss < best_val - 5e-4:
             best_val = avg_train_loss
             best_state = copy.deepcopy(model.state_dict())
             wait = 0
@@ -860,7 +856,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
             'batch_size': 512,
             'epochs': 100,
             'objective': nn.HuberLoss(),
-            'optim': torch.optim.AdamW(lstm_model_basic.parameters(), lr=1e-4),
+            'optim': torch.optim.AdamW(lstm_model_basic.parameters(), lr=1e-3, weight_decay=0.001),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         cat_model = CatBoostRegressor(
@@ -888,7 +884,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
             'batch_size': 512,
             'epochs': 100,
             'objective': nn.MSELoss(),
-            'optim': torch.optim.AdamW(gru_model_basic.parameters(), lr=1e-4, weight_decay=1e-5),
+            'optim': torch.optim.AdamW(gru_model_basic.parameters(), lr=1e-3, weight_decay=1e-4),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         
@@ -934,7 +930,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
         plt.title(f"{target_metric} {i}-step")
         plt.legend()
         if save_plots: 
-            plt.savefig(f'{path}/horizon_{i}_basic_regression.png')
+            plt.savefig(f'{path}/{target_metric}_horizon_{i}_basic_regression.png')
         plt.tight_layout()
         plt.show()
     
@@ -950,7 +946,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
     plt.grid(alpha=0.3)
     plt.legend()
     if save_plots: 
-        plt.savefig(f'{path}/train_maes.png')
+        plt.savefig(f'{path}/{target_metric}_train_maes.png')
     plt.tight_layout()
     plt.show()
     
@@ -966,7 +962,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
     plt.grid(alpha=0.3)
     plt.legend()
     if save_plots: 
-        plt.savefig(f'{path}/train_r2s.png')
+        plt.savefig(f'{path}/{target_metric}_train_r2s.png')
     plt.tight_layout()
     plt.show()
         
@@ -983,7 +979,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
     plt.grid(alpha=0.3)
     plt.legend()
     if save_plots: 
-        plt.savefig(f'{path}/test_maes.png')
+        plt.savefig(f'{path}/{target_metric}_test_maes.png')
     plt.tight_layout()
     plt.show()
         
@@ -999,7 +995,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
     plt.grid(alpha=0.3)
     plt.legend()
     if save_plots: 
-        plt.savefig(f'{path}/test_r2s.png')
+        plt.savefig(f'{path}/{target_metric}_test_r2s.png')
     plt.tight_layout()
     plt.show()
         
@@ -1058,16 +1054,16 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         assert len(test_windows_ds) == len(y_test_lagged)
         
         print("Training GRU")
-        model_lstm = GRUNetwork(input_size=6, hidden_size=256, output_size=len(qs), num_layers=4, dropout=0.1)
+        model_gru = GRUNetwork(input_size=6, hidden_size=128, output_size=len(qs), num_layers=2, dropout=0.1)
         model_param = {
-            'model': model_lstm,
+            'model': model_gru,
             'batch_size': 256,
             'epochs': 100,
             'objective': PinballLoss(qs),
-            'optim': torch.optim.AdamW(model_lstm.parameters(), lr=1e-1, weight_decay=1e-4),
+            'optim': torch.optim.AdamW(model_gru.parameters(), lr=1e-3, weight_decay=1e-4),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
-        gru_model, gru_data = train_gru_quantiles(train_windows_ds, test_windows_ds, model_param, qs)
+        gru_model, gru_data = train_gru_quantiles(train_windows_ds, test_windows_ds, model_param)
         preds = gru_data['preds']
         trues = gru_data['trues']
         y_true = trues * target_std + target_mean
@@ -1078,20 +1074,20 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
             high_preds = preds[:, qs.index(high)] * target_std + target_mean
             all_quantile_preds['gru'][low] = low_preds
             all_quantile_preds['gru'][high] = high_preds
-            coverage, band_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name='gru',save_plots=save_plots, 
-                                                               path=f'{path}/horizon{i}_gru_{low*100}_{high*100}_quantreg.png')
+            coverage, band_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name='gru',save_plot=save_plots, 
+                                                               path=f'{path}/{target_metric}_horizon{i}_gru_{low*100}_{high*100}_quantreg.png')
             all_coverages['gru'][i].append(coverage)
             all_bandwidths['gru'][i].append(band_width)
         
         
         print("Training LSTM")
-        model_lstm = LSTM_regressor(in_d=6, hidden_d=256, out_d=len(qs), num_layers=4, dropout=0.1)
+        model_lstm = LSTM_regressor(in_d=6, hidden_d=128, out_d=len(qs), num_layers=2, dropout=0.1)
         model_param = {
             'model': model_lstm,
             'batch_size': 256,
             'epochs': 100,
-            'objective': QuantileHuberLoss(qs),
-            'optim': torch.optim.AdamW(model_lstm.parameters(), lr=1e-1, weight_decay=1e-4),
+            'objective': QuantileLoss(qs),
+            'optim': torch.optim.AdamW(model_lstm.parameters(), lr=1e-3, weight_decay=1e-4),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         
@@ -1106,8 +1102,8 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
             high_preds = preds[:, qs.index(high)] * target_std + target_mean
             all_quantile_preds['lstm'][low] = low_preds
             all_quantile_preds['lstm'][high] = high_preds
-            coverage, band_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name='LSTM', save_plots=save_plots, 
-                                                               path=f'{path}/horizon{i}_lstm_{low*100}_{high*100}_quantreg.png')
+            coverage, band_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name='LSTM', save_plot=save_plots, 
+                                                               path=f'{path}/{target_metric}_horizon{i}_lstm_{low*100}_{high*100}_quantreg.png')
             all_coverages['lstm'][i].append(coverage)
             all_bandwidths['lstm'][i].append(band_width)
         
@@ -1116,11 +1112,12 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         all_quantile_preds['catboost']={j:cat_data['preds'][j] for j in qs}
         all_coverages['catboost'][i] = cat_data['coverages']
         all_bandwidths['catboost'][i] = cat_data['avg_widths']
+        y_true = y_test_lagged * target_std + target_mean
         for low, high in pairs:
-            low_preds = all_quantile_preds['catboost'][low]
-            high_preds = all_quantile_preds['catboost'][high]
-            helpers.visualize_quantiles(low_preds, high_preds, y_test_lagged, low, high, target_metric=target_metric, horizon=i, model_name="CatBoost", save_plots=save_plots, 
-                                                               path=f'{path}/horizon{i}_catboost_{low*100}_{high*100}_quantreg.png')
+            low_preds = all_quantile_preds['catboost'][low]* target_std + target_mean
+            high_preds = all_quantile_preds['catboost'][high]* target_std + target_mean
+            helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name="CatBoost", save_plot=save_plots, 
+                                                               path=f'{path}/{target_metric}_horizon{i}_catboost_{low*100}_{high*100}_quantreg.png')
                 
         print("Training MLP")
         MLP_model_param = {
@@ -1140,8 +1137,8 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
             y_true = MLP_data_low['trues'] * target_std + target_mean
             all_quantile_preds['mlp'][low] = low_preds
             all_quantile_preds['mlp'][high] = high_preds
-            coverage, band_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name='MLP', save_plots=save_plots, 
-                                                               path=f'{path}/horizon{i}_mlp_{low*100}_{high*100}_quantreg.png' )
+            coverage, band_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name='MLP', save_plot=save_plots, 
+                                                               path=f'{path}/{target_metric}_horizon{i}_mlp_{low*100}_{high*100}_quantreg.png' )
             all_coverages['mlp'][i].append(coverage)
             all_bandwidths['mlp'][i].append(band_width)
             
@@ -1150,12 +1147,9 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
     x = np.arange(len(horizons)) * 1.5
     bar_width = 0.8/4              # 4 model bars per horizon
     fig, axes = plt.subplots(1, len(pairs), figsize=(10, 4))
-    
+    axes = np.atleast_1d(axes)
     for i in range(len(labels)):
-        if len(pairs) > 1:
-            ax = axes[i]
-        else:
-            ax = axes
+        ax = axes[i]
         for m_idx, model in enumerate(all_coverages.keys()):
             coverage_dict = all_coverages[model]        # Indiced by horizon
             if not coverage_dict: continue
@@ -1176,13 +1170,15 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         ax.legend()
         ax.grid(axis="y", alpha=0.3)
     if save_plots: 
-        plt.savefig(f'{path}/coverage_comparison.png')
+        plt.savefig(f'{path}/{target_metric}_coverage_comparison.png')
     plt.tight_layout()
     plt.show()
     
     
     ##################### Interval Width Comparison Across Horizon between Models #############################
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    fig, axes = plt.subplots(1, len(pairs), figsize=(10, 4))
+    axes = np.atleast_1d(axes)
+    
     for i in range(len(labels)):
         if len(pairs) > 1:
             ax = axes[i]
@@ -1209,7 +1205,7 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         ax.legend()
         ax.grid(axis="y", alpha=0.3)
     if save_plots: 
-        plt.savefig(f'{path}/avg_width_comparison.png')
+        plt.savefig(f'{path}/{target_metric}_avg_width_comparison.png')
     plt.tight_layout()
     plt.show()
     
