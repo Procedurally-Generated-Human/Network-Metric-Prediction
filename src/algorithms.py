@@ -192,7 +192,7 @@ class QuantileLoss(nn.Module):
         loss = torch.where(u >= 0.0, qs_row * u, (qs_row - 1.0) * u)  # (B, k)
         return loss.mean()
 
-def train_lstm_timeseries(train_ds, test_ds, model_param={}):   
+def train_lstm_timeseries(train_ds, test_ds, model_param={}, return_per_epoch=False):   
     """
     Trains the LSTM regression model, using default Huberloss
 
@@ -228,19 +228,24 @@ def train_lstm_timeseries(train_ds, test_ds, model_param={}):
     model.to(DEVICE)
     
     train_losses = []
+    train_maes = []
+    test_maes = []
+    train_r2s = []
+    test_r2s = []
     best_state = None
     patience = 5
     wait = 0
     best_val=float('inf')
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, 
+                             shuffle=False, drop_last=False, num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False)   
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)   
         ####### Training #########################
         for x_batch, y_batch in train_loader:
-            x_batch = x_batch.to(DEVICE)
-            y_batch = y_batch.to(DEVICE)
+            x_batch = x_batch.to(DEVICE, non_blocking=True)
+            y_batch = y_batch.to(DEVICE, non_blocking=True)
             optimizer.zero_grad()
             y_pred = model(x_batch).squeeze(-1)
             loss = objective(y_pred, y_batch)
@@ -252,7 +257,7 @@ def train_lstm_timeseries(train_ds, test_ds, model_param={}):
         train_losses.append(avg_train)
         model.eval() 
         print(f" Epoch {epoch+1}/{epochs} | Train Loss: {avg_train:.6f}")
-        if avg_train < best_val - 5e-4:
+        if avg_train < best_val - 1e-4:
             best_val = avg_train
             best_state = copy.deepcopy(model.state_dict())
             wait = 0
@@ -261,6 +266,15 @@ def train_lstm_timeseries(train_ds, test_ds, model_param={}):
             if wait > patience:
                 model.load_state_dict(best_state)
                 break
+        if return_per_epoch:
+            pred_train, y_train = helpers.predict_model(model, train_loader, DEVICE)
+            pred_test, y_test = helpers.predict_model(model, test_loader, DEVICE)
+            train_maes.append(mean_absolute_error(y_train, pred_train))
+            test_maes.append(mean_absolute_error(y_test, pred_test))
+            train_r2s.append(r2_score(y_train, pred_train))
+            test_r2s.append(r2_score(y_test, pred_test))
+    
+    model.eval()
     pred_train, y_train = helpers.predict_model(model, train_loader, DEVICE)
     pred_test, y_test = helpers.predict_model(model, test_loader, DEVICE)
     metrics = {
@@ -270,6 +284,14 @@ def train_lstm_timeseries(train_ds, test_ds, model_param={}):
         "R2":   r2_score(y_test, pred_test),
         "y_pred_test": pred_test,
     }
+    if return_per_epoch:
+        metrics = {
+            "train_mae": train_maes,
+            "train_R2":  train_r2s,
+            "MAE":  test_maes,
+            "R2":   test_r2s,
+            "y_pred_test": pred_test,
+        }
     return model, metrics
 
 def train_lstm_quantiles(train_ds, test_ds, model_param={}):
@@ -311,17 +333,19 @@ def train_lstm_quantiles(train_ds, test_ds, model_param={}):
     patience = 5
     wait = 0
     best_val=float('inf')
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False, 
+                             num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)
     print("Begin training: ")
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False)   
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False,
+                                  num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)   
         
         ####### Training #########################
         for xb, yb in train_loader:
-            xb = xb.to(DEVICE).float()
-            yb = yb.to(DEVICE).float()
+            xb = xb.to(DEVICE,non_blocking=True).float()
+            yb = yb.to(DEVICE, non_blocking=True).float()
             optimizer.zero_grad()
             preds = model(xb)                  # (B, n_q)
             loss = objective(preds, yb)
@@ -334,7 +358,7 @@ def train_lstm_quantiles(train_ds, test_ds, model_param={}):
         
         model.eval()        
         print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.6f}")
-        if avg_train_loss < best_val - 5e-4:
+        if avg_train_loss < best_val - 1e-4:
             best_val = avg_train_loss
             best_state = copy.deepcopy(model.state_dict())
             wait = 0
@@ -526,7 +550,8 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
     DEVICE = model_param.get('DEVICE', torch.device("cuda" if torch.cuda.is_available() else "cpu") )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(DEVICE)
-    test_loader = DataLoader(TensorDataset(torch.from_numpy(X_test.astype(np.float32)), torch.from_numpy(y_test.astype(np.float32))), batch_size=batch_size, shuffle=False, drop_last=False)
+    test_loader = DataLoader(TensorDataset(torch.from_numpy(X_test.astype(np.float32)), torch.from_numpy(y_test.astype(np.float32))), batch_size=batch_size, shuffle=False,
+                             drop_last=False, num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)
     best_loss = np.inf
     wait = 0
     patience = 5
@@ -534,10 +559,11 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        train_loader = DataLoader(TensorDataset(torch.from_numpy(X_train.astype(np.float32)), torch.from_numpy(y_train.astype(np.float32))), batch_size=batch_size, shuffle=True, drop_last=False)
+        train_loader = DataLoader(TensorDataset(torch.from_numpy(X_train.astype(np.float32)), torch.from_numpy(y_train.astype(np.float32))), batch_size=batch_size, shuffle=True, 
+                                  drop_last=False, num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)
         for xb, yb in train_loader:
-            xb = xb.to(DEVICE).float()
-            yb = yb.to(DEVICE).float()
+            xb = xb.to(DEVICE, non_blocking=True).float()
+            yb = yb.to(DEVICE, non_blocking=True).float()
             optimizer.zero_grad()
             pred = model(xb).squeeze()
             loss = helpers.quantile_loss(pred, yb, q).to(DEVICE)
@@ -548,7 +574,7 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
         train_losses.append(avg_train)  
         print(f"Q={q} Epoch {epoch+1}/{epochs} Loss={avg_train:.4f}")
         # Early stopping
-        if avg_train < best_loss - 5e-4:
+        if avg_train < best_loss - 1e-4:
             best_loss = avg_train
             wait = 0
             best_state = model.state_dict()
@@ -675,7 +701,8 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
     
     DEVICE = model_param['device']
     model.to(DEVICE)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False, 
+                             num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)
     train_losses = []
     best_val_loss = float('inf')
     patience = 5
@@ -683,10 +710,12 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False)   
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False, 
+                                  num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)   
+        num_batches = 0
         # Mini-batch training
         for batch_X, batch_y in train_loader:
-            batch_X, batch_y = batch_X.to(DEVICE), batch_y.to(DEVICE)
+            batch_X, batch_y = batch_X.to(DEVICE, non_blocking=True), batch_y.to(DEVICE, non_blocking=True)
             optimizer.zero_grad()
             outputs = model(batch_X).squeeze(1)
             loss = objective(outputs, batch_y)
@@ -694,17 +723,18 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
             optimizer.step()
             epoch_loss += loss.item()
+            num_batches+=1
+        avg_train_loss = epoch_loss / num_batches
+        train_losses.append(avg_train_loss)
 
         # Validation
         model.eval()
-        avg_train_loss = epoch_loss / (len(train_ds) // batch_size)
-        train_losses.append(avg_train_loss)
         print(f" Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.6f}")
         # Early stopping
-        if avg_train_loss < best_val_loss - 5e-4:
+        if avg_train_loss < best_val_loss - 1e-4:
             best_val_loss = avg_train_loss
             patience_counter = 0
-            best_state = copy.deepcopy(model.state_dict())# torch.save(model.state_dict(), 'best_gru_rtt_model.pth')
+            best_state = copy.deepcopy(model.state_dict())
         else:
             patience_counter += 1
             if patience_counter > patience:
@@ -760,17 +790,19 @@ def train_gru_quantiles(train_ds, test_ds, model_param={}):
     patience = 5
     wait = 0
     best_val=float('inf')
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, drop_last=False
+                             , num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)
     
     print("Begin training: ")
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False)   
+        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=False,
+                                  num_workers=6, pin_memory=True, prefetch_factor=2, persistent_workers=True)   
         ####### Training #########################
         for xb, yb in train_loader:
-            xb = xb.to(DEVICE).float()
-            yb = yb.to(DEVICE).float()
+            xb = xb.to(DEVICE, non_blocking=True).float()
+            yb = yb.to(DEVICE, non_blocking=True).float()
             optimizer.zero_grad()
             preds = model(xb)                  # (B, n_q)
             loss = objective(preds, yb)
@@ -849,14 +881,14 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
         X_train_lagged, y_train_lagged = helpers.make_lagged_dataset(train.groupby('session_id', sort=False), target_metric, n_lags, horizon=i, feature_cols=feature_cols)
         X_test_lagged, y_test_lagged = helpers.make_lagged_dataset(test.groupby('session_id', sort=False), target_metric, n_lags, horizon=i, feature_cols=feature_cols)
         assert len(test_windows_ds) == len(y_test_lagged)
-        
-        lstm_model_basic = LSTM_regressor(in_d=6, hidden_d=128, out_d=1, num_layers=4, dropout=0.2)
+                
+        lstm_model_basic = LSTM_regressor(in_d=len(feature_cols), hidden_d=128, out_d=1, num_layers=3, dropout=0.2)
         basic_model_param = {
             'model': lstm_model_basic,
             'batch_size': 512,
             'epochs': 100,
             'objective': nn.HuberLoss(),
-            'optim': torch.optim.AdamW(lstm_model_basic.parameters(), lr=1e-3, weight_decay=0.001),
+            'optim': torch.optim.AdamW(lstm_model_basic.parameters(), lr=1e-4, weight_decay=0.001),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         cat_model = CatBoostRegressor(
@@ -878,15 +910,23 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
             verbose=True
         )
         
-        gru_model_basic = GRUNetwork(input_size=6, hidden_size=128, output_size=1, num_layers=3)
+        gru_model_basic = GRUNetwork(input_size=len(feature_cols), hidden_size=128, output_size=1, num_layers=4)
         gru_model_param={
             'model': gru_model_basic,
             'batch_size': 512,
             'epochs': 100,
             'objective': nn.MSELoss(),
-            'optim': torch.optim.AdamW(gru_model_basic.parameters(), lr=1e-3, weight_decay=1e-4),
+            'optim': torch.optim.AdamW(gru_model_basic.parameters(), lr=1e-4, weight_decay=0.001),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
+        
+        print(f"Training GRU")
+        gru_model, gru_data = train_gru_time_series(train_windows_ds, test_windows_ds, gru_model_param)
+        all_preds['gru'][i] = gru_data.get('y_pred_test', None)
+        all_train_mae['gru'].append(gru_data.get('train_mae', None))
+        all_test_mae['gru'].append(gru_data.get('MAE', None))
+        all_train_r2['gru'].append(gru_data.get('train_R2', None))
+        all_test_r2['gru'].append(gru_data.get('R2', None))
         
         print(f"Training LSTM")
         lstm_model, lstm_data = train_lstm_timeseries(train_windows_ds, test_windows_ds, basic_model_param)
@@ -895,7 +935,7 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
         all_test_mae['lstm'].append(lstm_data.get('MAE', None))
         all_train_r2['lstm'].append(lstm_data.get('train_R2', None))
         all_test_r2['lstm'].append(lstm_data.get('R2', None))
-        
+
         print(f"Training catboost")
         cat_model, cat_data = train_catboost_time_series(X_train_lagged, y_train_lagged, X_test_lagged, y_test_lagged, cat_model)
         all_preds['catboost'][i] = cat_data.get('y_pred_test', None)
@@ -912,22 +952,17 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
         all_train_r2['mlp'].append(mlp_data.get('train_R2', None))
         all_test_r2['mlp'].append(mlp_data.get('R2', None))
         
-        print(f"Training GRU")
-        gru_model, gru_data = train_gru_time_series(train_windows_ds, test_windows_ds, gru_model_param)
-        all_preds['gru'][i] = gru_data.get('y_pred_test', None)
-        all_train_mae['gru'].append(gru_data.get('train_mae', None))
-        all_test_mae['gru'].append(gru_data.get('MAE', None))
-        all_train_r2['gru'].append(gru_data.get('train_R2', None))
-        all_test_r2['gru'].append(gru_data.get('R2', None))
         
         plt.figure(figsize=(10,4))
         rescaled_trues = y_test_lagged[:200] * target_std + target_mean
         plt.plot(rescaled_trues, label="Actual")
         for (model, c) in [['lstm', 'blue'], ['catboost', 'orange'], ['gru', 'purple'], ['mlp', 'g']]:
-            if len(all_preds[model])==0: continue
+            if all_preds[model][i] is None or len(all_preds[model][i])==0: continue
             rescaled = all_preds[model][i][:200]*target_std + target_mean
             plt.plot(rescaled, '--', color=c, label=f"{model}Pred")
         plt.title(f"{target_metric} {i}-step")
+        plt.xlabel('Timesteps')
+        plt.ylabel(f'{target_metric}')
         plt.legend()
         if save_plots: 
             plt.savefig(f'{path}/{target_metric}_horizon_{i}_basic_regression.png')
@@ -953,10 +988,10 @@ def run_basic_models_comparison(df, feature_cols, target_metric, n_lags, sample_
     
     plt.figure(figsize=(8,5))
     for (model, m) in [['lstm', 'o'], ['catboost', 's'], ['gru', '^'], ['mlp', 'x']]:
-        if all_train_mae[model] == []: continue
+        if all_train_r2[model] == []: continue
         plt.plot(horizons, all_train_r2[model], marker=m, label=f'R2 ({model})')
     plt.xlabel('Horizon')
-    plt.ylabel('MAE')
+    plt.ylabel('R2')
     plt.title(f'Train R2 vs Horizon ({target_metric})')
     plt.xticks(horizons)
     plt.grid(alpha=0.3)
@@ -1053,14 +1088,30 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         X_test_lagged, y_test_lagged = helpers.make_lagged_dataset(test.groupby('session_id', sort=False), target_metric, n_lags, horizon=i, feature_cols=feature_cols)
         assert len(test_windows_ds) == len(y_test_lagged)
         
+        
+        print("Training Catboost")
+        cat_model, cat_data = train_catboost_quantile(X_train_lagged, y_train_lagged, X_test_lagged, y_test_lagged, quantiles=qs)
+        all_quantile_preds['catboost']={j:cat_data['preds'][j] for j in qs}
+        y_true = y_test_lagged * target_std + target_mean
+        all_coverages['catboost'][i] = []
+        all_bandwidths['catboost'][i] = []
+        for low, high in pairs:
+            low_preds = all_quantile_preds['catboost'][low]* target_std + target_mean
+            high_preds = all_quantile_preds['catboost'][high]* target_std + target_mean
+            coverage, avg_width = helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name="CatBoost", save_plot=save_plots, 
+                                                               path=f'{path}/{target_metric}_horizon{i}_catboost_{low*100}_{high*100}_quantreg.png')
+            all_coverages['catboost'][i].append(coverage)
+            all_bandwidths['catboost'][i].append(avg_width)
+            
+            
         print("Training GRU")
-        model_gru = GRUNetwork(input_size=6, hidden_size=128, output_size=len(qs), num_layers=2, dropout=0.1)
+        model_gru = GRUNetwork(input_size=6, hidden_size=128, output_size=len(qs), num_layers=3, dropout=0.1)
         model_param = {
             'model': model_gru,
-            'batch_size': 256,
+            'batch_size': 512,
             'epochs': 100,
             'objective': PinballLoss(qs),
-            'optim': torch.optim.AdamW(model_gru.parameters(), lr=1e-3, weight_decay=1e-4),
+            'optim': torch.optim.AdamW(model_gru.parameters(), lr=1e-4, weight_decay=1e-4),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         gru_model, gru_data = train_gru_quantiles(train_windows_ds, test_windows_ds, model_param)
@@ -1084,10 +1135,10 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         model_lstm = LSTM_regressor(in_d=6, hidden_d=128, out_d=len(qs), num_layers=2, dropout=0.1)
         model_param = {
             'model': model_lstm,
-            'batch_size': 256,
+            'batch_size': 512,
             'epochs': 100,
             'objective': QuantileLoss(qs),
-            'optim': torch.optim.AdamW(model_lstm.parameters(), lr=1e-3, weight_decay=1e-4),
+            'optim': torch.optim.AdamW(model_lstm.parameters(), lr=5e-4, weight_decay=1e-4),
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         
@@ -1107,24 +1158,12 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
             all_coverages['lstm'][i].append(coverage)
             all_bandwidths['lstm'][i].append(band_width)
         
-        print("Training Catboost")
-        cat_model, cat_data = train_catboost_quantile(X_train_lagged, y_train_lagged, X_test_lagged, y_test_lagged, quantiles=qs)
-        all_quantile_preds['catboost']={j:cat_data['preds'][j] for j in qs}
-        all_coverages['catboost'][i] = cat_data['coverages']
-        all_bandwidths['catboost'][i] = cat_data['avg_widths']
-        y_true = y_test_lagged * target_std + target_mean
-        for low, high in pairs:
-            low_preds = all_quantile_preds['catboost'][low]* target_std + target_mean
-            high_preds = all_quantile_preds['catboost'][high]* target_std + target_mean
-            helpers.visualize_quantiles(low_preds, high_preds, y_true, low, high, target_metric=target_metric, horizon=i, model_name="CatBoost", save_plot=save_plots, 
-                                                               path=f'{path}/{target_metric}_horizon{i}_catboost_{low*100}_{high*100}_quantreg.png')
-                
         print("Training MLP")
         MLP_model_param = {
             'batch_size': 2048,
             'epochs': 100,
             'objective': helpers.quantile_loss,
-            'lr': 1e-3,
+            'lr': 1e-4,
             'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
         }
         all_coverages['mlp'][i] = []
@@ -1180,10 +1219,7 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
     axes = np.atleast_1d(axes)
     
     for i in range(len(labels)):
-        if len(pairs) > 1:
-            ax = axes[i]
-        else:
-            ax = axes
+        ax = axes[i]
         for m_idx, model in enumerate(all_coverages.keys()):
             interval_width = all_bandwidths[model]        # Indiced by horizon
             if not interval_width: continue

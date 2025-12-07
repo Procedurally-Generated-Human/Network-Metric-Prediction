@@ -59,21 +59,25 @@ def form_sliding_windows(df_groups, regression_target, regress_based_on, n_lags,
         g[regression_target] = g[regress_based_on].shift(-horizon)       # Set the target by horizon-lagged regression target --> values up to time t predicts t+horizon value
         g = g.dropna().reset_index(drop=True)
         
-        if len(g) < n_lags+1: continue  # If number of timesteps is less than window length, skip this group
-        array = g[feature_cols]             #(B, feature_dim)           # Obtain the values for the focused features
-        targets = g[regression_target]      #(B, )                      # Obtain the target regression
+        if len(g) < n_lags: continue  # If number of timesteps is less than window length, skip this group
+        array = g.loc[:,feature_cols].to_numpy()             #(B, feature_dim)           # Obtain the values for the focused features
+        targets = g[regression_target].to_numpy()      #(B, )                      # Obtain the target regression
 
-        windows = sliding_window_view(array.to_numpy(), window_shape=n_lags+1, axis=0)
+        windows = sliding_window_view(array, window_shape=n_lags, axis=0)
         # Want (B, SEQ_LEN, feature_dim), but sliding_window_view returns (B, feature_dim, SEQ_LEN) for some reason
         if windows.shape[2] != array.shape[1]:
             windows = windows.transpose(0, 2, 1)
+        window_count = windows.shape[0]
+        indices = np.arange(n_lags-1, n_lags-1 + window_count)
+        targets = targets[indices]
         
         X_windows.append(windows)
-        y_windows.append(targets.to_numpy()[n_lags:])
+        y_windows.append(targets)
     X_windows = np.concatenate(X_windows, axis=0)
     y_windows = np.concatenate(y_windows, axis=0)
     assert len(X_windows) == len(y_windows)
     return X_windows, y_windows
+
 
 def make_lagged_dataset(df_groups, target, n_lags, horizon, feature_cols):
     """
@@ -101,7 +105,7 @@ def make_lagged_dataset(df_groups, target, n_lags, horizon, feature_cols):
         # Add lag features
         if len(g) < n_lags+1: continue  # If number of timesteps is less than window length, skip this group
         
-        for lag in range(1, n_lags+1):
+        for lag in range(1, n_lags):
             for c in feature_cols:
                 g[f"{c}_lag{lag}"] = g[c].shift(lag)
 
@@ -152,6 +156,7 @@ def predict_model(model, data_loader:DataLoader, DEVICE):
     """
     Return y_preds, y_true of the current model, from the data_loader
     """
+    model.eval()   
     y_preds = []
     y_trues = []
     with torch.no_grad():
@@ -287,4 +292,24 @@ def compare_between_horizons(all_coverages, all_band_widths, horizons, quantile_
     plt.tight_layout()
     plt.show()
     
+def smooth_dataset(df:pd.DataFrame, smoothing_window_size, keep_orig=False, groupby = None, feature_cols=[]):
+    def _smooth_series(s:pd.Series):
+        return s.rolling(window=smoothing_window_size, min_periods=1, center=False).mean()
     
+    df = df.copy()
+    if isinstance(groupby, str):
+        groups = df.groupby(groupby, sort=False)
+        for col in feature_cols:
+            smoothed = groups[col].transform(_smooth_series)
+            if keep_orig:
+                df[f'{col}_smoothed'] = smoothed
+            else:
+                df[col] = smoothed
+    else:
+        for col in feature_cols:
+            smoothed = _smooth_series(df[col])
+            if keep_orig:
+                df[f'{col}_smoothed'] = smoothed
+            else:
+                df[col] = smoothed      
+    return df
