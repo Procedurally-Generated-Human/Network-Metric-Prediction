@@ -1105,7 +1105,7 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
             
             
         print("Training GRU")
-        model_gru = GRUNetwork(input_size=6, hidden_size=128, output_size=len(qs), num_layers=3, dropout=0.1)
+        model_gru = GRUNetwork(input_size=len(feature_cols), hidden_size=128, output_size=len(qs), num_layers=3, dropout=0.1)
         model_param = {
             'model': model_gru,
             'batch_size': 512,
@@ -1132,7 +1132,7 @@ def run_quantile_models_comparison(df, feature_cols, target_metric, n_lags, samp
         
         
         print("Training LSTM")
-        model_lstm = LSTM_regressor(in_d=6, hidden_d=128, out_d=len(qs), num_layers=2, dropout=0.1)
+        model_lstm = LSTM_regressor(in_d=len(feature_cols), hidden_d=128, out_d=len(qs), num_layers=2, dropout=0.1)
         model_param = {
             'model': model_lstm,
             'batch_size': 512,

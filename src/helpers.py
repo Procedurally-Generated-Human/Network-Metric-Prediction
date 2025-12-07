@@ -33,8 +33,8 @@ def load_puffer_dataset():
 
 def form_sliding_windows(df_groups, regression_target, regress_based_on, n_lags, horizon, feature_cols):
     """
-    Given grouped views of dataframe, form sliding windows for time series regression tasks based on in regression_based_on column
-    Regression_target is the column to be predicted at time t+horizon based on values up to time t
+    Given grouped views of dataframe, form sliding windows for time series regression tasks based on `regression_based_on` column  
+    `Regression_target` is the column to be predicted at time `t+horizon` based on values up to time t
     
     This assumes df_groups are selected from the same distribution
 
@@ -43,7 +43,7 @@ def form_sliding_windows(df_groups, regression_target, regress_based_on, n_lags,
         regression_target (string): name of the target regression column (will be added)
         regress_based_on (_type_): regression is based on this column
         n_lags (_type_): number of past timesteps to consider
-        horizon (_type_): time horizon to predict ahead
+        horizon (_type_): timestep to predict ahead
         feature_cols (_type_): set of columns to be used as features
 
     Returns:
@@ -78,11 +78,10 @@ def form_sliding_windows(df_groups, regression_target, regress_based_on, n_lags,
     assert len(X_windows) == len(y_windows)
     return X_windows, y_windows
 
-
 def make_lagged_dataset(df_groups, target, n_lags, horizon, feature_cols):
     """
     Given grouped views of dataframe, form lagged features for time series regression task
-    Regression_target is the column to be predicted at time t+horizon based on values up to time t
+    `Regression_target` is the column to be predicted at time t+horizon based on values up to time t
     
     This assumes df_groups are selected from the same distribution
     
@@ -90,7 +89,7 @@ def make_lagged_dataset(df_groups, target, n_lags, horizon, feature_cols):
         df_groups (pd.DataFrameGroupBy): grouped DataFrame object
         target (string): name of the target regression column
         n_lags (_type_): number of past timesteps to consider
-        horizon (_type_): time horizon to predict ahead
+        horizon (_type_): timestep to predict ahead
         feature_cols (_type_): set of columns to be used as base features
 
     Returns:
@@ -154,7 +153,7 @@ def predict_multi_quantiles(model, loader, device):
 
 def predict_model(model, data_loader:DataLoader, DEVICE):
     """
-    Return y_preds, y_true of the current model, from the data_loader
+    Return y_preds, y_true of the current model, predicting on the data_loader
     """
     model.eval()   
     y_preds = []
@@ -170,19 +169,12 @@ def predict_model(model, data_loader:DataLoader, DEVICE):
     y_trues = np.concatenate(y_trues, axis=0)
     return y_preds, y_trues
 
-def median_index_from_qs(qs):
-    q_arr = np.array(qs)
-    if 0.5 in q_arr:
-        return int(np.where(q_arr == 0.5)[0][0])
-    return int(np.argmin(np.abs(q_arr - 0.5)))
-
 def form_puffer_tensor_dataset(df_train:pd.DataFrame, df_test:pd.DataFrame, feature_cols: list[str], target_metric: str, n_lags: int, horizon: int):
     """
     Form TensorDataset for the raw MTS data, after forming sliding windows
 
     Args:
         df_train (pd.DataFrame): train MTS
-        df_validate (pd.DataFrame): validation MTS
         df_test ( pd.Dataframe): test MTS
         feature_cols (list[str]): column names of important features
         target_metric (str): column name of regression target
@@ -224,8 +216,22 @@ def visualize_samples(y_true, y_pred, horizon, target_metric, n_samples=200):
 
 def visualize_quantiles(low_pred, high_pred, y_true, q_low, q_high, horizon, target_metric, n_samples=200, model_name="",save_plot=False, path=""):
     """
-    Display target_metric's quantile prediction, for n_samples
+    Display target_metric's quantile-pair prediction, for n_samples.  
+    Returns coverage, avg_width of the quantile predictions
     
+    Args:
+        low_pred (np.ndarray) : low quantile prediction
+        high_pred (np.ndarray) : high quantile prediction
+        y_true (np.ndarray) : true values
+        q_low (float) : Low quantile percentage value
+        q_high (float) : High quantile percentage value
+        horizon (int) : Prediction timestep, for labelling purposes
+        target_metric (str) : Regression name, for labelling purposes
+        n_samples (int) : number of predictions to display
+        model_name (str) : Model name, for labelling purposes
+        save_plot (bool) : Toggle saving the plots
+        path (str) : Path to save plots
+        
     Return:
         coverage (float): average percentage of y_true between [low, high] quantile predictions  
         avg_width (float): average width between [low, high] prediction
@@ -255,44 +261,18 @@ def visualize_quantiles(low_pred, high_pred, y_true, q_low, q_high, horizon, tar
     plt.tight_layout()
     plt.show()
     return coverage, avg_width
-
-def compare_between_horizons(all_coverages, all_band_widths, horizons, quantile_ranges, target_metric):
-    """
-    Display the coverage percentage / average coverage range across horizon
-    """
-    coverage_array = np.array([all_coverages[f'horizon_{h}'] for h in horizons])
-    width_array = np.array([all_band_widths[f'horizon_{h}'] for h in horizons])
-    x = np.arange(5)  # horizon positions
-    bar_width = 1/len(quantile_ranges)              # 2 bars per horizon
-    offsets = [(i - (len(quantile_ranges) - 1) / 2) * bar_width for i in range(len(quantile_ranges))]           
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    ax = axes[0]
-    for i in range(len(quantile_ranges)):  # 2 quantile ranges
-        ax.bar(x + offsets[i], coverage_array[:,i], 
-            width=bar_width, label=quantile_ranges[i])
-    ax.set_title(f"{target_metric} Coverage Across Horizons")
-    ax.set_xlabel("Horizon")
-    ax.set_ylabel("Coverage (%)")
-    ax.set_xticks(x)
-    ax.set_xticklabels([h for h in horizons])
-    ax.legend()
-    ax.grid(axis="y", alpha=0.3)
-
-    ax = axes[1]
-    for i in range(len(quantile_ranges)):  
-        ax.bar(x + offsets[i], width_array[:,i], 
-            width=bar_width, label=quantile_ranges[i])
-    ax.set_title(f"{target_metric} Prediction Interval Width Across Horizons")
-    ax.set_xlabel("Horizon")
-    ax.set_ylabel("Mean Interval Width")
-    ax.set_xticks(x)
-    ax.set_xticklabels([h for h in horizons])
-    ax.legend()
-    ax.grid(axis="y", alpha=0.3)
-    plt.tight_layout()
-    plt.show()
     
 def smooth_dataset(df:pd.DataFrame, smoothing_window_size, keep_orig=False, groupby = None, feature_cols=[]):
+    """
+    Smooth `feature_cols` the MTS dataset, based on `smoothing_window_size`.  Optionally discard original raw columns
+
+    Args:
+        df (pd.DataFrame): MTS dataset
+        smoothing_window_size (_type_): length of window to smooth based on
+        keep_orig (bool, optional): Toggle whether to keep the default raw values
+        groupby (_type_, optional): column name to perform smoothing based on groupby groups.
+        feature_cols (list, optional): Columns requiring smoothing.
+    """
     def _smooth_series(s:pd.Series):
         return s.rolling(window=smoothing_window_size, min_periods=1, center=False).mean()
     
