@@ -3,12 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import requests
 from numpy.lib.stride_tricks import sliding_window_view
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, r2_score
 import torch
-import torch.nn as nn
-import random
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 
 def load_puffer_dataset():
