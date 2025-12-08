@@ -422,7 +422,7 @@ def train_catboost_quantile(X_train, y_train, X_test, y_test, quantiles=[0.1, 0.
         quantiles (list[float]): list of quantiles to train. Must be monotonic increasing
 
     Returns:
-        model (CatBoostRegressor): trained model  
+        models (CatBoostRegressor): list of trained model, one per quantile
         data (dict): performances : 
             {"preds": mean_absolute_error(y_train, pred_train),  
             "coverages":  r2_score(y_train, pred_train),  
@@ -497,11 +497,11 @@ def train_mlp_time_series(X_train, y_train, X_test, y_test, model:MLPRegressor):
     Trains a basic mlp regressor
 
     Args:
-        X_train (_type_): _description_
-        y_train (_type_): _description_
-        X_test (_type_): _description_
-        y_test (_type_): _description_
-        model (MLPRegressor): _description_
+        X_train (np.ndarray): Training set
+        y_train (np.ndarray): Train label
+        X_test (np.ndarray): Testing set
+        y_test (np.ndarray): Test label
+        model (MLPRegressor): model to train on
 
     Returns:
         model (MLPRegressor): trained model  
@@ -529,15 +529,24 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
     Trains a mlp model through quantile regression using a singular quantile value
 
     Args:
-        X_train (NDarray):
-        y_train (NDarray): 
-        X_test (NDarray):
-        y_test (NDarray):
+        X_train (NDarray): Training set
+        y_train (NDarray): Train labels
+        X_test (NDarray): Testing set
+        y_test (NDarray): Test labels
         q (int): selected quantile 
-        model (CatBoostRegressor): 
+        model (dict): 
+            Sample: 
+            model_param = {
+                        'model': MLP(...),
+                        'batch_size': 256,
+                        'epochs': 100,
+                        'objective': QuantileLoss(quantiles),
+                        'optim': torch.optim.AdamW(model_lstm.parameters(), lr=1e-1, weight_decay=1e-4),
+                        'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    }
 
     Returns:
-        model (CatBoostRegressor): trained model
+        model (CatBoostRegressor): trained model, based on specified quantile q
         data (dict): performances:
             {'preds': y_preds,
             'trues': y_trues,
@@ -674,19 +683,19 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
     Args:
         train_ds (TensorDataset): Train Tensor
         test_ds(TensorDataset): Test tensor
-        model_param (dict, optional): Model parameters. Defaults to {}.
+        model_param (dict, optional): Model parameters. Defaults to {}.  
             Example Parms :
-                model_param = {
-                    'model': model_gru,
-                    'batch_size': 256,
-                    'epochs': 100,
-                    'objective': objective,
-                    'optim': torch.optim.AdamW(model_gru.parameters(), lr=1e-1, weight_decay=1e-4),
-                    'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                }
+            model_param = {
+                'model': GRUNetwork(...),
+                'batch_size': 256,
+                'epochs': 100,
+                'objective': objective,
+                'optim': torch.optim.AdamW(model_gru.parameters(), lr=1e-1, weight_decay=1e-4),
+                'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            }
     Returns:
         model: trained model  
-        metrics (dict): performances  s
+        metrics (dict): performances 
             {"train_mae": mean_absolute_error(y_train, pred_train),  
             "train_R2":  r2_score(y_train, pred_train),  
             "MAE":  mean_absolute_error(y_test, pred_test),  
@@ -759,10 +768,10 @@ def train_gru_quantiles(train_ds, test_ds, model_param={}):
     Args:
         train_ds (TensorDataset): Train Tensor
         test_ds(TensorDataset): Test tensor
-        model_param (dict, optional): Model parameters. Defaults to {}.
+        model_param (dict, optional): Model parameters. Defaults to {}. NOTE: quantiles list(float): in monotonic ascending order [0,1]  
             Sample Params:
                     model_param = {
-                        'model': model_gru,
+                        'model': GRUNetwork(...),
                         'batch_size': 256,
                         'epochs': 100,
                         'objective': QuantileLoss(quantiles),
