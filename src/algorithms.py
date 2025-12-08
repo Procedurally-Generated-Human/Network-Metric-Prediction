@@ -39,58 +39,6 @@ class LSTM_regressor(nn.Module):
         last_output = out[:, -1, :]
         output = self.dense_out(last_output)
         return output
-    
-class LSTM_quantile(nn.Module):
-    """
-    (THIS IS A PROTOTYPE)
-    A LSTM regression model that predicts quantile values. It includes a monotonic head to generate quantile 
-    predictions with positive increments. 
-
-    Attributes:
-        in_dim (int): input_dim.
-        hidden_d (int): hidden units in the LSTM layers.
-        num_layers (int): The number of LSTM layers.
-        n_q (int): The number of quantiles to predict.
-        lstm (nn.LSTM): The LSTM layer used for temporal feature extraction.
-        head_base (nn.Linear): A linear layer to predict the base quantile value.
-        head_deltas (nn.Linear): A linear layer to predict the positive deltas for the quantiles.
-        
-    Args:
-        in_d (int): input dimension
-        hidden_d (int): hidden layer dimension
-        out_d (int): Output dimension
-        num_layers (int): Number of hidden layers
-        dropout (float): Droput ratio between layers
-    """
-    def __init__(self, in_d, hidden_d, out_d, num_layers=1, dropout=0.0):
-        super().__init__()
-        self.in_dim = in_d
-        self.hidden_d = hidden_d
-        self.num_layers = num_layers
-        self.n_q = out_d
-
-        self.lstm = nn.LSTM(
-            input_size=self.in_dim,
-            hidden_size=hidden_d,
-            num_layers=self.num_layers,
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0.0
-        )
-
-        # monotonic head: base (one value) + deltas (n_q-1 positive increments)
-        self.head_base = nn.Linear(hidden_d, 1)
-        self.head_deltas = nn.Linear(hidden_d, self.n_q - 1)
-
-    def forward(self, x):
-        # x: (B, seq_len, in_d)
-        out, (h_n, c_n) = self.lstm(x)           # out: (B, seq_len, hidden*dirs)
-        last = out[:, -1, :]                     # (B, fc_in)
-        base = self.head_base(last)              # (B,1)
-        deltas = self.head_deltas(last)          # (B, n_q-1)
-        deltas_pos = F.softplus(deltas)          # positive increments (B, n_q-1)
-        increments = torch.cumsum(deltas_pos, dim=1)  # cumulative increments (B, n_q-1)
-        quantiles_out = torch.cat([base, base + increments], dim=1)  # (B, n_q)
-        return quantiles_out
 
 class QuantileHuberLoss(nn.Module):
     """
@@ -190,7 +138,7 @@ class QuantileLoss(nn.Module):
 
 def train_lstm_timeseries(train_ds, test_ds, model_param={}, return_per_epoch=False):   
     """
-    Trains the LSTM regression model, using default Huberloss
+    Trains the LSTM regression model, using default Huberloss from pytorch
 
     Args:
         train_ds (TensorDataset): Train Tensor
@@ -207,7 +155,7 @@ def train_lstm_timeseries(train_ds, test_ds, model_param={}, return_per_epoch=Fa
                 }
     Returns:
         model: trained model  
-        metrics (dict): performances  s
+        metrics (dict): performances:
             {"train_mae": mean_absolute_error(y_train, pred_train),  
             "train_R2":  r2_score(y_train, pred_train),  
             "MAE":  mean_absolute_error(y_test, pred_test),  
@@ -378,15 +326,15 @@ def train_catboost_time_series(X_train, y_train, X_test, y_test, model:CatBoostR
     Trains the catboost model
 
     Args:
-        X_train (NDarray):
-        y_train (NDarray): 
-        X_test (NDarray):
-        y_test (NDarray):
+        X_train (NDarray): Training set
+        y_train (NDarray): Train labels
+        X_test (NDarray): Testing set
+        y_test (NDarray): Test labels
         model (CatBoostRegressor): 
 
     Returns:
         model (CatBoostRegressor): trained model  
-        metrics (dict): performances
+        metrics (dict): performances: 
             {"train_mae": mean_absolute_error(y_train, pred_train),  
             "train_R2":  r2_score(y_train, pred_train),  
             "MAE":  mean_absolute_error(y_test, pred_test),  
@@ -411,10 +359,10 @@ def train_catboost_quantile(X_train, y_train, X_test, y_test, quantiles=[0.1, 0.
     Trains the catboost model through quantile regression. Also compute coverage percentage through the quantile pairs and average width
 
     Args:
-        X_train (NDarray):
-        y_train (NDarray): 
-        X_test (NDarray):
-        y_test (NDarray):
+        X_train (NDarray): Training set
+        y_train (NDarray): Train labels
+        X_test (NDarray): Testing set
+        y_test (NDarray): Test labels
         quantiles (list[float]): list of quantiles to train. Must be monotonic increasing
 
     Returns:
@@ -497,11 +445,11 @@ def train_mlp_time_series(X_train, y_train, X_test, y_test, model:MLPRegressor):
         y_train (np.ndarray): Train label
         X_test (np.ndarray): Testing set
         y_test (np.ndarray): Test label
-        model (MLPRegressor): model to train on
+        model (MLPRegressor):
 
     Returns:
         model (MLPRegressor): trained model  
-        metrics (dict): performances  s
+        metrics (dict): performances:
             {"train_mae": mean_absolute_error(y_train, pred_train),  
             "train_R2":  r2_score(y_train, pred_train),  
             "MAE":  mean_absolute_error(y_test, pred_test),  
@@ -542,8 +490,8 @@ def train_mlp_quantile(X_train, y_train, X_test, y_test, q, model_param={}):
                     }
 
     Returns:
-        model (CatBoostRegressor): trained model, based on specified quantile q
-        data (dict): performances:
+        model (CatBoostRegressor): trained model, based on specified quantile q  
+        data (dict): performances: 
             {'preds': y_preds,
             'trues': y_trues,
             'train_loss': train_losses,
@@ -691,7 +639,7 @@ def train_gru_time_series(train_ds, test_ds, model_param={}):
             }
     Returns:
         model: trained model  
-        metrics (dict): performances 
+        metrics (dict): performances: 
             {"train_mae": mean_absolute_error(y_train, pred_train),  
             "train_R2":  r2_score(y_train, pred_train),  
             "MAE":  mean_absolute_error(y_test, pred_test),  
@@ -770,7 +718,7 @@ def train_gru_quantiles(train_ds, test_ds, model_param={}):
                         'model': GRUNetwork(...),
                         'batch_size': 256,
                         'epochs': 100,
-                        'objective': QuantileLoss(quantiles),
+                        'objective': PinballLoss(quantiles),
                         'optim': torch.optim.AdamW(model_lstm.parameters(), lr=1e-1, weight_decay=1e-4),
                         'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
                     }
