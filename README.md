@@ -1,10 +1,33 @@
 # Multi-Horizon Forecasting of Network Metrics Using Machine Learning
-This repository is an exploratory final course project for Concordia Univeristy's COMP6321  
+This repository is an exploratory final course project for Concordia Univeristy's COMP6321: Machine Learning. The full report can be read [here](https://github.com/Procedurally-Generated-Human/Network-Metric-Prediction/blob/main/Final-Report.pdf).
+
 Contributors: 
 1. Mohammadparsa Toopchinezhad
 2. Long Uy Nguyen
 3. Daryel Leon Cachott
 4. James-Samuel Lemieux-Laing
+
+## Abstract
+
+Accurate forecasting of network metrics such as throughput and delay is essential
+for adaptive bitrate (ABR) algorithms, which rely on these predictions to make
+stable rate-selection decisions and maintain user Quality of Experience (QoE)
+during video streaming. While most prior work focuses on single-step forecasting,
+multi-horizon predictions can help ABRs anticipate future network changes rather
+than react to them. We study multi-horizon forecasting of key network metrics using
+real-world data, evaluating CatBoost, MLP, GRU, and LSTM models across several
+horizons. We also incorporate quantile regression via the pinball loss to capture
+uncertainty in highly variable network conditions. Our results show that treebased models maintain the strongest point-forecast accuracy across horizons, while
+recurrent models offer competitive short-term performance. Quantile regression
+produces well-calibrated uncertainty intervals whose width grows appropriately
+with horizon, providing more informative predictions for downstream control.
+
+![Visual Abstract](https://github.com/Procedurally-Generated-Human/Network-Metric-Prediction/blob/main/Visual-Abstract.png)
+
+## Sample Plots
+![Quantile](https://github.com/Procedurally-Generated-Human/Network-Metric-Prediction/blob/main/plots/rtt_horizon4_lstm_25.0_75.0_quantreg.png)
+![Act-vs-Pred](https://github.com/Procedurally-Generated-Human/Network-Metric-Prediction/blob/main/plots/delivery_rate_horizon_2_basic_regression.png)
+![Comparison](https://github.com/Procedurally-Generated-Human/Network-Metric-Prediction/blob/main/plots/rtt_test_maes.png)
 
 ## Environment
 ```
@@ -53,3 +76,19 @@ To run and store our quantile regression results + comparison between 4 models:
 for metric in ['rtt', 'delivery_rate']:
     algorithms.run_quantile_models_comparison(df, feature_cols=base_features, target_metric=metric, n_lags=n_lags, sample_size=sample_size, horizons=horizons, qs=qs, save_plots=True)
 ```
+
+
+## Citation
+
+If you use this work in your research or projects, please cite:
+
+### 📎 BibTeX
+
+```bibtex
+@misc{toopchinezhad2025multihorizon,
+  title        = {Multi-Horizon Forecasting of Network Metrics Using Machine Learning},
+  author       = {Toopchinezhad, Mohammadparsa and Nguyen, Long Uy and Cachott, Daryel Leon and Lemieux-Laing, James-Samuel},
+  year         = {2025},
+  howpublished = {Final Course Project, COMP 6321: Machine Learning, Concordia University},
+  url          = {https://github.com/Procedurally-Generated-Human/Network-Metric-Prediction}
+}
